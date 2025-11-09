@@ -138,5 +138,6 @@ def verify_face():
 # --- 7. START THE APP (for local testing) ---
 # This part is now only for running it locally
 if __name__ == '__main__':
-    # We've already loaded the model, so just run the app
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Hugging Face provides the port in an environment variable
+    port = int(os.environ.get('PORT', 7860)) 
+    app.run(host='0.0.0.0', port=port)
