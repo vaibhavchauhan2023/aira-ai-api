@@ -1,0 +1,6 @@
+# Python
+venv/
+*.pyc
+
+# AI Model (Ignore this!)
+*.h5
