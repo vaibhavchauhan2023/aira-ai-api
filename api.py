@@ -37,14 +37,13 @@ def preprocess_image(image):
 # --- 4. MODEL DOWNLOAD & LOAD LOGIC ---
 MODEL_URL = "https://github.com/vaibhavchauhan2023/aira-ai-api/releases/download/v1.0/siamesemodel.h5"
 MODEL_PATH = "siamesemodel.h5"
-SIAMESE_MODEL = None
+SIAMESE_MODEL = None # We will load this into this global variable
 
 def download_model():
     # Check if model already exists
     if os.path.exists(MODEL_PATH):
         print("[SERVER] Model already exists. Skipping download.")
         return
-
     print(f"[SERVER] Downloading model from {MODEL_URL}...")
     try:
         with requests.get(MODEL_URL, stream=True) as r:
@@ -59,6 +58,15 @@ def download_model():
 def load_siamese_model():
     global SIAMESE_MODEL
     try:
+        # Check if the model file exists, if not, download it
+        if not os.path.exists(MODEL_PATH):
+            print("[SERVER] Model file not found, downloading...")
+            download_model()
+            
+        if not os.path.exists(MODEL_PATH):
+             print("[SERVER] FATAL: Model file still not found after download attempt.")
+             return # Stop if download failed
+
         # We must pass 'L1Dist' as a custom object
         SIAMESE_MODEL = load_model(
             MODEL_PATH, 
@@ -68,7 +76,13 @@ def load_siamese_model():
     except Exception as e:
         print(f"[SERVER] Error loading model: {e}")
 
-# --- 5. THE VERIFICATION API ENDPOINT ---
+# --- 5. *THIS IS THE FIX* ---
+# Run the load logic when Gunicorn imports the file (at the global scope).
+# We no longer wait for __name__ == '__main__'.
+load_siamese_model()
+# ------------------------------
+
+# --- 6. THE VERIFICATION API ENDPOINT ---
 @app.route('/api/verify-face', methods=['POST'])
 def verify_face():
     global SIAMESE_MODEL
@@ -90,24 +104,24 @@ def verify_face():
         processed_webcam_img = preprocess_image(webcam_img)
 
         # --- 2. Load the Anchor Image from our database ---
-        # This is why you must rename your 19 photos!
         anchor_path = os.path.join('data', 'anchor', f'{user_id}.jpg')
         
         if not os.path.exists(anchor_path):
+            print(f"[SERVER] ERROR: Anchor image not found at {anchor_path}")
             return jsonify({'success': False, 'message': f'No verification image on file for user {user_id}.'}), 400
             
         anchor_img = cv2.imread(anchor_path)
+        if anchor_img is None:
+            print(f"[SERVER] ERROR: Anchor image found but could not be read at {anchor_path}")
+            return jsonify({'success': False, 'message': 'Could not read verification image.'}), 500
+
         processed_anchor_img = preprocess_image(anchor_img)
 
         # --- 3. Make the Prediction ---
         prediction = SIAMESE_MODEL.predict([processed_anchor_img, processed_webcam_img])
-        similarity_score = prediction[0][0] 
+        similarity_score = float(prediction[0][0]) # Convert from numpy.float32
         
-        # --- 4. (USER) TODO: TUNE THIS THRESHOLD ---
-        # This is the most important value. You must test this!
-        # 0.5 is the default from the tutorial.
-        # If it's too high (e.g., 0.8), it will always fail.
-        # If it's too low (e.g., 0.2), it will let anyone in.
+        # This is the threshold from the tutorial. You may need to tune this!
         VERIFICATION_THRESHOLD = 0.5 
         
         print(f"[SERVER] Verification for {user_id}: Score = {similarity_score} (Threshold: {VERIFICATION_THRESHOLD})")
@@ -121,10 +135,8 @@ def verify_face():
         print(f"[SERVER] An error occurred during face verification: {e}")
         return jsonify({'success': False, 'message': f'An error occurred: {e}'}), 500
 
-# --- 6. START THE APP ---
+# --- 7. START THE APP (for local testing) ---
+# This part is now only for running it locally
 if __name__ == '__main__':
-    # When we run this file, first download, then load, then start the server
-    download_model()
-    load_siamese_model()
-    # Flask runs on port 5000 by default, which is what Render expects
-    app.run(host='0.0.0.0', port=5000)
+    # We've already loaded the model, so just run the app
+    app.run(host='0.0.0.0', port=5000, debug=True)
